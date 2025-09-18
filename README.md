@@ -98,7 +98,7 @@ constructing `BrlmmProblem`, `BrlmmConfig`, and `BrlmmRng` structs, then calling
 samplers on simulated data. Performance gains increase with the number of latent
 blocks (high LX/LK), because latent updates dominate runtime.
 
-## Why and When to Use CBRLMM
+## When to use the C implementations over the R implementation
 
 - **Large latent structures** – When your model carries many fixed or random
   effect blocks (hundreds of SVD/eigen decompositions), the C sampler avoids the
