@@ -20,7 +20,8 @@ script_path <- function() {
 script_file <- script_path()
 project_root <- normalizePath(file.path(dirname(script_file), ".."), winslash = "/", mustWork = TRUE)
 src_dir <- file.path(project_root, "src")
-dll_name <- file.path(src_dir, paste0("brlmm_port", .Platform$dynlib.ext))
+bridge_dir <- file.path(project_root, "bridge")
+dll_name <- file.path(bridge_dir, paste0("brlmm_port", .Platform$dynlib.ext))
 
 # Load R implementation --------------------------------------------------
 source(file.path(project_root, "brlmm.R"))
@@ -28,11 +29,13 @@ source(file.path(project_root, "brlmm.R"))
 build_native <- function(force = FALSE) {
   if (force || !file.exists(dll_name)) {
     message("Compiling native BRLMM port ...")
-    cmd <- c("CMD", "SHLIB", "-o", dll_name,
-             file.path(src_dir, "brlmm_bridge.c"),
+    cmd <- c("CMD", "SHLIB",
+             "-o", dll_name,
+             file.path(bridge_dir, "brlmm_bridge.c"),
              file.path(src_dir, "brlmm.c"),
              file.path(src_dir, "brlmm_utils.c"))
-    status <- system2(file.path(R.home("bin"), "R"), cmd)
+    status <- system2(file.path(R.home("bin"), "R"), cmd,
+                     env = sprintf("PKG_CPPFLAGS=-I%s", src_dir))
     if (!identical(status, 0L)) {
       stop("Compilation of brlmm_port shared library failed", call. = FALSE)
     }
@@ -379,23 +382,26 @@ compare_implementations <- function(seed = NULL,
   )
 }
 
-cat("Running BRLMM comparison test...\n")
-summary <- compare_implementations()
-cat("\nChain statistics (mean/variance differences):\n")
-print(summary$chain)
-cat("\nPrediction summary (mean differences vs variances):\n")
-print(summary$prediction$summary)
-cat("\nPer-individual prediction comparison (first 10 rows):\n")
-print(utils::head(summary$prediction$details, 10))
-cat("\nLatent U |cor| summary:\n")
-print(summary$latent_correlation$summary)
-cat("Comparable latent columns:", length(summary$latent_correlation$values),"\n")
-cat("Latent sD2 diff summary:\n")
-print(summary$latent_scaling$diff_summary)
-cat("Latent sD2 ratio summary:\n")
-print(summary$latent_scaling$ratio_summary)
-cat("Latent rank/overlap info (first 10):\n")
-print(stats::na.omit(head(summary$latent_scaling$meta, 10)))
-cat("\nRuntime comparison (seconds):\n")
-print(summary$runtime)
-cat("\nTest complete.\n")
+if (isTRUE(getOption("brlmm.run_compare_on_source", TRUE)) &&
+    identical(environment(), globalenv())) {
+  cat("Running BRLMM comparison test...\n")
+  summary <- compare_implementations()
+  cat("\nChain statistics (mean/variance differences):\n")
+  print(summary$chain)
+  cat("\nPrediction summary (mean differences vs variances):\n")
+  print(summary$prediction$summary)
+  cat("\nPer-individual prediction comparison (first 10 rows):\n")
+  print(utils::head(summary$prediction$details, 10))
+  cat("\nLatent U |cor| summary:\n")
+  print(summary$latent_correlation$summary)
+  cat("Comparable latent columns:", length(summary$latent_correlation$values),"\n")
+  cat("Latent sD2 diff summary:\n")
+  print(summary$latent_scaling$diff_summary)
+  cat("Latent sD2 ratio summary:\n")
+  print(summary$latent_scaling$ratio_summary)
+  cat("Latent rank/overlap info (first 10):\n")
+  print(stats::na.omit(head(summary$latent_scaling$meta, 10)))
+  cat("\nRuntime comparison (seconds):\n")
+  print(summary$runtime)
+  cat("\nTest complete.\n")
+}

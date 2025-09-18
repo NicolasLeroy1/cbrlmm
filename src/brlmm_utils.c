@@ -3,10 +3,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <R_ext/RS.h>
-#include <R_ext/Lapack.h>
+#if __has_include(<cblas.h>)
+#include <cblas.h>
+#define BRLMM_HAVE_CBLAS 1
+#else
+#define BRLMM_HAVE_CBLAS 0
+#endif
 
-int brlmm_copy_row_to_col(const double *src, size_t rows, size_t cols, double **out) {
+static int brlmm_copy_row_to_col(const double *src, size_t rows, size_t cols, double **out) {
     if (!src || !out) {
         return BRLMM_ERR_INVALID_ARGUMENT;
     }
@@ -21,6 +25,10 @@ int brlmm_copy_row_to_col(const double *src, size_t rows, size_t cols, double **
     }
     *out = dst;
     return BRLMM_OK;
+}
+
+int brlmm_alloc_col_major(const double *src, size_t rows, size_t cols, double **out) {
+    return brlmm_copy_row_to_col(src, rows, cols, out);
 }
 
 void brlmm_copy_from_col_major(const double *src, size_t rows, size_t cols, double *dst) {
@@ -142,16 +150,25 @@ void brlmm_matrix_vector_mul(const BrlmmMatrix *mat, const double *vec, double *
         return;
     }
     double *col = NULL;
-    if (brlmm_copy_row_to_col(mat->data, mat->rows, mat->cols, &col) != BRLMM_OK) {
+    if (brlmm_alloc_col_major(mat->data, mat->rows, mat->cols, &col) != BRLMM_OK) {
         return;
     }
-    int m = (int)mat->rows;
-    int n = (int)mat->cols;
-    int lda = m;
-    int inc = 1;
-    double alpha = 1.0;
-    double beta = 0.0;
-    F77_CALL(dgemv)("N", &m, &n, &alpha, col, &lda, vec, &inc, &beta, out, &inc FCONE);
+#if BRLMM_HAVE_CBLAS
+    cblas_dgemv(CblasColMajor, CblasNoTrans,
+                (int)mat->rows, (int)mat->cols,
+                1.0, col, (int)mat->rows,
+                vec, 1, 0.0, out, 1);
+#else
+    size_t m = mat->rows;
+    size_t n = mat->cols;
+    for (size_t i = 0; i < m; ++i) {
+        double acc = 0.0;
+        for (size_t j = 0; j < n; ++j) {
+            acc += col[j * m + i] * vec[j];
+        }
+        out[i] = acc;
+    }
+#endif
     free(col);
 }
 
@@ -160,16 +177,25 @@ void brlmm_matrix_transpose_vector_mul(const BrlmmMatrix *mat, const double *vec
         return;
     }
     double *col = NULL;
-    if (brlmm_copy_row_to_col(mat->data, mat->rows, mat->cols, &col) != BRLMM_OK) {
+    if (brlmm_alloc_col_major(mat->data, mat->rows, mat->cols, &col) != BRLMM_OK) {
         return;
     }
-    int m = (int)mat->rows;
-    int n = (int)mat->cols;
-    int lda = m;
-    int inc = 1;
-    double alpha = 1.0;
-    double beta = 0.0;
-    F77_CALL(dgemv)("T", &m, &n, &alpha, col, &lda, vec, &inc, &beta, out, &inc FCONE);
+#if BRLMM_HAVE_CBLAS
+    cblas_dgemv(CblasColMajor, CblasTrans,
+                (int)mat->rows, (int)mat->cols,
+                1.0, col, (int)mat->rows,
+                vec, 1, 0.0, out, 1);
+#else
+    size_t m = mat->rows;
+    size_t n = mat->cols;
+    for (size_t j = 0; j < n; ++j) {
+        double acc = 0.0;
+        for (size_t i = 0; i < m; ++i) {
+            acc += col[j * m + i] * vec[i];
+        }
+        out[j] = acc;
+    }
+#endif
     free(col);
 }
 

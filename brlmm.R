@@ -221,9 +221,6 @@ compute_K_latent_list = function(K_list,inertia_threshold) {
   }))
 }
 
-
-
-
 rinv_gamma <- function(a, b){1 / rgamma(1, shape = a, rate = b)}
 
 update_current_horseshoe <- function(current, latent_list, L, n){

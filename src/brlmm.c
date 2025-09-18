@@ -4,8 +4,23 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <R_ext/BLAS.h>
-#include <R_ext/Lapack.h>
+#if __has_include(<lapacke.h>)
+#include <lapacke.h>
+#define BRLMM_HAVE_LAPACKE 1
+#else
+#define BRLMM_HAVE_LAPACKE 0
+#endif
+
+#if !BRLMM_HAVE_LAPACKE
+typedef int lapack_int;
+extern void dgesvd_(char *jobu, char *jobvt, const lapack_int *m, const lapack_int *n,
+                    double *a, const lapack_int *lda, double *s,
+                    double *u, const lapack_int *ldu, double *vt, const lapack_int *ldvt,
+                    double *work, const lapack_int *lwork, lapack_int *info);
+extern void dsyev_(char *jobz, char *uplo, const lapack_int *n,
+                   double *a, const lapack_int *lda, double *w,
+                   double *work, const lapack_int *lwork, lapack_int *info);
+#endif
 
 static void brlmm_latent_clear(BrlmmLatent *latent);
 static int brlmm_latent_copy(const BrlmmLatent *src, BrlmmLatent *dst);
@@ -588,6 +603,30 @@ int brlmm_update_state_horseshoe(BrlmmState *state,
         return shuffle_rc;
     }
 
+    size_t max_rank = 0;
+    for (size_t l = 0; l < L; ++l) {
+        if (state->nu.items[l].size > max_rank) {
+            max_rank = state->nu.items[l].size;
+        }
+    }
+
+    double *UtR = NULL;
+    double *scale2_nu = NULL;
+    double *center_nu = NULL;
+    if (max_rank > 0) {
+        UtR = (double *)calloc(max_rank, sizeof(double));
+        scale2_nu = (double *)calloc(max_rank, sizeof(double));
+        center_nu = (double *)calloc(max_rank, sizeof(double));
+        if (!UtR || !scale2_nu || !center_nu) {
+            free(center_nu);
+            free(scale2_nu);
+            free(UtR);
+            free(order);
+            free(effect_buffer);
+            return BRLMM_ERR_MEMORY;
+        }
+    }
+
     int loop_status = BRLMM_OK;
     for (size_t idx = 0; idx < L; ++idx) {
         size_t l = order[idx];
@@ -602,15 +641,10 @@ int brlmm_update_state_horseshoe(BrlmmState *state,
         brlmm_matrix_vector_mul(&latent->U, nu_l, effect_buffer);
         brlmm_update_residual_with_effect(residuals, effect_buffer, lambda_old, n);
 
-        double *UtR = (double *)calloc(rank, sizeof(double));
-        double *scale2_nu = (double *)calloc(rank, sizeof(double));
-        double *center_nu = (double *)calloc(rank, sizeof(double));
-        if (!UtR || !scale2_nu || !center_nu) {
-            free(UtR);
-            free(scale2_nu);
-            free(center_nu);
-            loop_status = BRLMM_ERR_MEMORY;
-            break;
+        if (UtR) {
+            memset(UtR, 0, max_rank * sizeof(double));
+            memset(scale2_nu, 0, max_rank * sizeof(double));
+            memset(center_nu, 0, max_rank * sizeof(double));
         }
 
         brlmm_matrix_transpose_vector_mul(&latent->U, residuals, UtR);
@@ -655,14 +689,13 @@ int brlmm_update_state_horseshoe(BrlmmState *state,
 
         brlmm_matrix_vector_mul(&latent->U, nu_l, effect_buffer);
         brlmm_update_residual_with_effect(residuals, effect_buffer, -lambda_new, n);
-
-        free(UtR);
-        free(scale2_nu);
-        free(center_nu);
     }
 
     free(order);
     free(effect_buffer);
+    free(center_nu);
+    free(scale2_nu);
+    free(UtR);
     if (loop_status != BRLMM_OK) {
         return loop_status;
     }
@@ -1253,10 +1286,10 @@ static int brlmm_prepare_latents_from_X(const BrlmmMatrix *X,
         return BRLMM_ERR_MEMORY;
     }
 
-    int m = (int)n;
-    int ncols = (int)p;
-    int lda = m;
-    int minmn = (m < ncols) ? m : ncols;
+    lapack_int m = (lapack_int)n;
+    lapack_int ncols = (lapack_int)p;
+    lapack_int lda = m;
+    lapack_int minmn = (m < ncols) ? m : ncols;
     double *singular = (double *)calloc((size_t)minmn, sizeof(double));
     double *u = (double *)calloc((size_t)m * (size_t)minmn, sizeof(double));
     double *vt = (double *)calloc((size_t)minmn * (size_t)ncols, sizeof(double));
@@ -1271,36 +1304,34 @@ static int brlmm_prepare_latents_from_X(const BrlmmMatrix *X,
         return BRLMM_ERR_MEMORY;
     }
 
-    int lwork = -1;
+    lapack_int info = 0;
+#if BRLMM_HAVE_LAPACKE
+    info = LAPACKE_dgesvd(LAPACK_COL_MAJOR, 'S', 'S',
+                          m, ncols, colX, lda,
+                          singular, u, m, vt, minmn, NULL);
+#else
+    lapack_int lwork = -1;
     double wkopt;
-    int info;
-    F77_CALL(dgesvd)("S", "S", &m, &ncols, colX, &lda, singular, u, &m, vt, &minmn,
-                     &wkopt, &lwork, &info FCONE FCONE);
-    if (info != 0) {
-        free(work);
-        free(means);
-        free(sds);
-        free(colX);
-        free(singular);
-        free(u);
-        free(vt);
-        return BRLMM_ERR_UNSUPPORTED;
+    dgesvd_("S", "S", &m, &ncols, colX, &lda, singular,
+            u, &m, vt, &minmn, &wkopt, &lwork, &info);
+    if (info == 0) {
+        lwork = (lapack_int)wkopt;
+        double *work_svd = (double *)malloc((size_t)lwork * sizeof(double));
+        if (!work_svd) {
+            free(work);
+            free(means);
+            free(sds);
+            free(colX);
+            free(singular);
+            free(u);
+            free(vt);
+            return BRLMM_ERR_MEMORY;
+        }
+        dgesvd_("S", "S", &m, &ncols, colX, &lda, singular,
+                u, &m, vt, &minmn, work_svd, &lwork, &info);
+        free(work_svd);
     }
-    lwork = (int)wkopt;
-    double *work_svd = (double *)malloc((size_t)lwork * sizeof(double));
-    if (!work_svd) {
-        free(work);
-        free(means);
-        free(sds);
-        free(colX);
-        free(singular);
-        free(u);
-        free(vt);
-        return BRLMM_ERR_MEMORY;
-    }
-    F77_CALL(dgesvd)("S", "S", &m, &ncols, colX, &lda, singular, u, &m, vt, &minmn,
-                     work_svd, &lwork, &info FCONE FCONE);
-    free(work_svd);
+#endif
     free(colX);
     if (info != 0) {
         free(work);
@@ -1471,27 +1502,29 @@ static int brlmm_prepare_latents_from_K(const BrlmmMatrix *K,
         free(colK);
         return BRLMM_ERR_MEMORY;
     }
-    int n_int = (int)n;
-    int lwork = -1;
+    lapack_int n_int = (lapack_int)n;
+    lapack_int info = 0;
+#if BRLMM_HAVE_LAPACKE
+    info = LAPACKE_dsyev(LAPACK_COL_MAJOR, 'V', 'U',
+                         n_int, colK, n_int, eigenvalues);
+#else
+    lapack_int lwork = -1;
     double wkopt;
-    int info;
-    F77_CALL(dsyev)("V", "U", &n_int, colK, &n_int, eigenvalues, &wkopt, &lwork,
-                    &info FCONE FCONE);
-    if (info != 0) {
-        free(colK);
-        free(eigenvalues);
-        return BRLMM_ERR_UNSUPPORTED;
+    dsyev_("V", "U", &n_int, colK, &n_int, eigenvalues,
+           &wkopt, &lwork, &info);
+    if (info == 0) {
+        lwork = (lapack_int)wkopt;
+        double *work_dsyev = (double *)malloc((size_t)lwork * sizeof(double));
+        if (!work_dsyev) {
+            free(colK);
+            free(eigenvalues);
+            return BRLMM_ERR_MEMORY;
+        }
+        dsyev_("V", "U", &n_int, colK, &n_int, eigenvalues,
+               work_dsyev, &lwork, &info);
+        free(work_dsyev);
     }
-    lwork = (int)wkopt;
-    double *work_dsyev = (double *)malloc((size_t)lwork * sizeof(double));
-    if (!work_dsyev) {
-        free(colK);
-        free(eigenvalues);
-        return BRLMM_ERR_MEMORY;
-    }
-    F77_CALL(dsyev)("V", "U", &n_int, colK, &n_int, eigenvalues, work_dsyev, &lwork,
-                    &info FCONE FCONE);
-    free(work_dsyev);
+#endif
     if (info != 0) {
         free(colK);
         free(eigenvalues);
