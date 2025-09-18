@@ -1246,7 +1246,7 @@ static int brlmm_prepare_latents_from_X(const BrlmmMatrix *X,
     }
 
     double *colX = NULL;
-    if (brlmm_copy_row_to_col(work, n, p, &colX) != BRLMM_OK) {
+    if (brlmm_alloc_col_major(work, n, p, &colX) != BRLMM_OK) {
         free(work);
         free(means);
         free(sds);
@@ -1463,7 +1463,7 @@ static int brlmm_prepare_latents_from_K(const BrlmmMatrix *K,
                                         BrlmmLatent *latent) {
     size_t n = K->rows;
     double *colK = NULL;
-    if (brlmm_copy_row_to_col(K->data, n, n, &colK) != BRLMM_OK) {
+    if (brlmm_alloc_col_major(K->data, n, n, &colK) != BRLMM_OK) {
         return BRLMM_ERR_MEMORY;
     }
     double *eigenvalues = (double *)calloc(n, sizeof(double));

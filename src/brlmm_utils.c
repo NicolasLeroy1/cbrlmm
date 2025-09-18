@@ -4,7 +4,6 @@
 #include <string.h>
 #include <math.h>
 #include <R_ext/RS.h>
-#include <R_ext/BLAS.h>
 #include <R_ext/Lapack.h>
 
 int brlmm_copy_row_to_col(const double *src, size_t rows, size_t cols, double **out) {
@@ -24,7 +23,7 @@ int brlmm_copy_row_to_col(const double *src, size_t rows, size_t cols, double **
     return BRLMM_OK;
 }
 
-void brlmm_copy_col_to_row(const double *src, size_t rows, size_t cols, double *dst) {
+void brlmm_copy_from_col_major(const double *src, size_t rows, size_t cols, double *dst) {
     if (!src || !dst) {
         return;
     }
@@ -274,27 +273,15 @@ int brlmm_compute_xtx(const double *data, size_t rows, size_t cols, double *out)
     if (!data || !out) {
         return BRLMM_ERR_INVALID_ARGUMENT;
     }
-    double *col = NULL;
-    if (brlmm_copy_row_to_col(data, rows, cols, &col) != BRLMM_OK) {
-        return BRLMM_ERR_MEMORY;
+    for (size_t j = 0; j < cols; ++j) {
+        for (size_t k = 0; k < cols; ++k) {
+            double acc = 0.0;
+            for (size_t i = 0; i < rows; ++i) {
+                acc += data[i * cols + j] * data[i * cols + k];
+            }
+            out[j * cols + k] = acc;
+        }
     }
-    double *colC = (double *)calloc(cols * cols, sizeof(double));
-    if (!colC) {
-        free(col);
-        return BRLMM_ERR_MEMORY;
-    }
-    int m = (int)cols;
-    int n = (int)cols;
-    int k = (int)rows;
-    int lda = (int)rows;
-    int ldb = (int)rows;
-    int ldc = m;
-    double alpha = 1.0;
-    double beta = 0.0;
-    F77_CALL(dgemm)("T", "N", &m, &n, &k, &alpha, col, &lda, col, &ldb, &beta, colC, &ldc FCONE FCONE);
-    brlmm_copy_col_to_row(colC, cols, cols, out);
-    free(colC);
-    free(col);
     return BRLMM_OK;
 }
 
@@ -303,31 +290,13 @@ void brlmm_matrix_multiply_raw(const double *A, size_t a_rows, size_t a_cols,
     if (!A || !B || !out) {
         return;
     }
-    double *colA = NULL;
-    double *colB = NULL;
-    if (brlmm_copy_row_to_col(A, a_rows, a_cols, &colA) != BRLMM_OK ||
-        brlmm_copy_row_to_col(B, a_cols, b_cols, &colB) != BRLMM_OK) {
-        free(colA);
-        free(colB);
-        return;
+    for (size_t i = 0; i < a_rows; ++i) {
+        for (size_t j = 0; j < b_cols; ++j) {
+            double acc = 0.0;
+            for (size_t k = 0; k < a_cols; ++k) {
+                acc += A[i * a_cols + k] * B[k * b_cols + j];
+            }
+            out[i * b_cols + j] = acc;
+        }
     }
-    double *colC = (double *)calloc(a_rows * b_cols, sizeof(double));
-    if (!colC) {
-        free(colA);
-        free(colB);
-        return;
-    }
-    int m = (int)a_rows;
-    int n = (int)b_cols;
-    int k = (int)a_cols;
-    int lda = (int)a_rows;
-    int ldb = (int)a_cols;
-    int ldc = m;
-    double alpha = 1.0;
-    double beta = 0.0;
-    F77_CALL(dgemm)("N", "N", &m, &n, &k, &alpha, colA, &lda, colB, &ldb, &beta, colC, &ldc FCONE FCONE);
-    brlmm_copy_col_to_row(colC, a_rows, b_cols, out);
-    free(colC);
-    free(colA);
-    free(colB);
 }
