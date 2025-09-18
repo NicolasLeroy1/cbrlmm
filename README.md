@@ -1,6 +1,6 @@
-# CBRLMM: Bayesian Regression with Latent Mixed Models
+# CBRLMM: C Bayesian Regularization of Latent Mixed Models
 
-CBRLMM is a portable C implementation of the **Bayesian Regression with Latent Mixed Models** sampler.
+CBRLMM is a portable C implementation of the **Bayesian Regularization of Latent Mixed Models** sampler.
 Originally written in R (`brlmm.R`), the project now exposes:
 
 - a pure C library (`cbrlmm`) that performs data preparation, latent-factor
