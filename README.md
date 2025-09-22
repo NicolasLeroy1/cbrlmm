@@ -7,6 +7,7 @@ exposing a fast native library that other languages can call through FFI:
   decomposition, and Horseshoe-regularized Gibbs sampling, and
 - language bridges (e.g. the R bridge under `bridge/`) plus bindable headers so
   other runtimes can call the sampler via FFI.
+- a pure R version in (`brlmm.R`) that is easier to use if you are working on not so large datasets.
 
 ## Why and When to Use BRLMM
 
