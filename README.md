@@ -8,21 +8,16 @@ exposing a fast native library that other languages can call through FFI:
 - language bridges (e.g. the R bridge under `bridge/`) plus bindable headers so
   other runtimes can call the sampler via FFI.
 
-## Why and When to Use CBRLMM
+## Why and When to Use BRLMM
 
-Reach for CBRLMM when:
+Reach for BRLMM when:
 
 - You work with heterogeneous feature sets (many categorical/continuous blocks)
   and want the model to infer which latent groups explain the response.
-- You need to combine several kernel constructions—CBRLMM can ingest multiple
+- You need to combine several kernel constructions—BRLMM can ingest multiple
   random-effect kernels and lets the sampler retain the most relevant ones.
 - Your data are high-dimensional (*p* ≫ *n*) or strongly correlated (e.g.
   genomic panels) where the Horseshoe prior and latent low-rank structure shine.
-- You require faster sampling or cross-language deployment; the native library
-  avoids R’s interpreter overhead and links into any FFI-friendly environment.
-
-Stick with the pure-R version for small datasets or quick prototyping entirely
-within R when the native speedup is negligible.
 
 ## Model Overview
 
